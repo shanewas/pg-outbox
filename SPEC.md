@@ -10,9 +10,10 @@ duplicate domain events. Buyer: .NET + Postgres shops without MassTransit/CAP.
   SQL-Server-only. `PandaTech.MassTransit.PostgresOutbox` requires MassTransit.
   TS side `zehelein/pg-transactional-outbox` (36 stars) is TS-only.
 - No lightweight PG-first standalone .NET outbox exists. No dual-stack one.
-- Beat angle: Zehelein-compatible table shape so mixed .NET+TS shops adopt
-  incrementally; drop-in lib, zero framework adoption; LISTEN/NOTIFY with poll
-  fallback; consumer-side dedup (inbox table).
+- Beat angle: drop-in lib, zero framework adoption; poll relay with 30s
+  claim leases; consumer-side dedup (inbox table).
+- Explicit non-goals (downgraded from earlier draft): exact wire-compat with
+  Zehelein tables, LISTEN/NOTIFY fast path. README is the truth.
 
 ## 3. Stack
 .NET 9 (EF Core or raw Npgsql — Npgsql, fewer deps), Postgres. MIT.

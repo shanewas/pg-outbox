@@ -15,6 +15,7 @@ public sealed record OutboxMessage(
 public sealed class OutboxOptions
 {
     public int BatchSize { get; set; } = 50;
+    public TimeSpan ClaimLease { get; set; } = TimeSpan.FromSeconds(30);
     public TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(1);
     public int MaxAttempts { get; set; } = 10;
     public TimeSpan BaseDelay { get; set; } = TimeSpan.FromSeconds(1);

@@ -23,7 +23,7 @@ public sealed class RelayWorker(
 
     public async Task RelayOnceAsync(CancellationToken ct)
     {
-        var batch = await store.ClaimAsync(_options.BatchSize, ct);
+        var batch = await store.ClaimAsync(_options.BatchSize, _options.ClaimLease, ct);
         foreach (var msg in batch)
         {
             try

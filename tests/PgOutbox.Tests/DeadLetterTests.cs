@@ -6,12 +6,12 @@ public sealed class DeadLetterTests
     public async Task PoisonMessage_DeadLettersAfterMaxAttempts()
     {
         var store = new FakeStore();
-        store.Seed(FakeStore.New(attempts: 2));
-        var msg = (await store.ClaimAsync(10, CancellationToken.None)).Single();
+        var seeded = FakeStore.New(attempts: 2);
+        store.Seed(seeded);
         var opts = new OutboxOptions { MaxAttempts = 3, BaseDelay = TimeSpan.Zero };
         var worker = new RelayWorker(store, _ => throw new InvalidOperationException("poison"), opts);
         await worker.RelayOnceAsync(CancellationToken.None);
-        var row = store.Get(msg.Id);
+        var row = store.Get(seeded.Id);
         Assert.NotNull(row.DeadLetteredAt);
         Assert.Equal(3, row.Attempts);
     }

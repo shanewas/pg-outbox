@@ -16,16 +16,17 @@ public sealed class FakeStore : IOutboxStore
         Guid.NewGuid(), agg, type, """{"a":1}""", "{}", created ?? DateTimeOffset.UtcNow,
         null, null, attempts, next ?? DateTimeOffset.UtcNow.AddMinutes(-1));
 
-    public Task<IReadOnlyList<OutboxMessage>> ClaimAsync(int batchSize, CancellationToken ct)
+    public Task<IReadOnlyList<OutboxMessage>> ClaimAsync(int batchSize, TimeSpan lease, CancellationToken ct)
     {
         lock (_lock)
         {
             if (FailClaimOnce) { FailClaimOnce = false; throw new InvalidOperationException("crash"); }
-            IReadOnlyList<OutboxMessage> due = _rows
+            var due = _rows
                 .Where(m => m.DispatchedAt is null && m.DeadLetteredAt is null
                     && m.NextAttemptAt <= DateTimeOffset.UtcNow)
                 .OrderBy(m => m.CreatedAt).ThenBy(m => m.Id).Take(batchSize).ToList();
-            return Task.FromResult(due);
+            foreach (var m in due) Mutate(m.Id, x => x with { NextAttemptAt = DateTimeOffset.UtcNow + lease });
+            return Task.FromResult<IReadOnlyList<OutboxMessage>>(due);
         }
     }
 

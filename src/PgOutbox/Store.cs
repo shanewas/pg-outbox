@@ -4,7 +4,7 @@ namespace PgOutbox;
 
 public interface IOutboxStore
 {
-    Task<IReadOnlyList<OutboxMessage>> ClaimAsync(int batchSize, CancellationToken ct);
+    Task<IReadOnlyList<OutboxMessage>> ClaimAsync(int batchSize, TimeSpan lease, CancellationToken ct);
     Task MarkDispatchedAsync(Guid id, CancellationToken ct);
     Task MarkFailedAsync(Guid id, DateTimeOffset nextAttemptAt, CancellationToken ct);
     Task DeadLetterAsync(Guid id, CancellationToken ct);
@@ -12,11 +12,12 @@ public interface IOutboxStore
 
 public sealed class PgOutboxStore(NpgsqlDataSource dataSource) : IOutboxStore
 {
-    public async Task<IReadOnlyList<OutboxMessage>> ClaimAsync(int batchSize, CancellationToken ct)
+    public async Task<IReadOnlyList<OutboxMessage>> ClaimAsync(int batchSize, TimeSpan lease, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await using var cmd = new NpgsqlCommand("""
+        var rows = new List<OutboxMessage>();
+        await using (var cmd = new NpgsqlCommand("""
             SELECT id, aggregate, type, payload, headers, created_at, dispatched_at,
                    dead_lettered_at, attempts, next_attempt_at
             FROM outbox_messages
@@ -25,21 +26,31 @@ public sealed class PgOutboxStore(NpgsqlDataSource dataSource) : IOutboxStore
             ORDER BY created_at, id
             LIMIT $1
             FOR UPDATE SKIP LOCKED
-            """, conn, tx);
-        cmd.Parameters.AddWithValue(batchSize);
-        var rows = new List<OutboxMessage>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+            """, conn, tx))
         {
-            rows.Add(new OutboxMessage(
-                reader.GetGuid(0), reader.GetString(1), reader.GetString(2),
-                reader.GetFieldValue<string>(3), reader.GetFieldValue<string>(4),
-                reader.GetFieldValue<DateTimeOffset>(5),
-                await reader.IsDBNullAsync(6, ct) ? null : reader.GetFieldValue<DateTimeOffset>(6),
-                await reader.IsDBNullAsync(7, ct) ? null : reader.GetFieldValue<DateTimeOffset>(7),
-                reader.GetInt32(8), reader.GetFieldValue<DateTimeOffset>(9)));
+            cmd.Parameters.AddWithValue(batchSize);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                rows.Add(new OutboxMessage(
+                    reader.GetGuid(0), reader.GetString(1), reader.GetString(2),
+                    reader.GetFieldValue<string>(3), reader.GetFieldValue<string>(4),
+                    reader.GetFieldValue<DateTimeOffset>(5),
+                    await reader.IsDBNullAsync(6, ct) ? null : reader.GetFieldValue<DateTimeOffset>(6),
+                    await reader.IsDBNullAsync(7, ct) ? null : reader.GetFieldValue<DateTimeOffset>(7),
+                    reader.GetInt32(8), reader.GetFieldValue<DateTimeOffset>(9)));
+            }
+            await reader.CloseAsync();
         }
-        await reader.CloseAsync();
+        if (rows.Count > 0)
+        {
+            await using var leaseCmd = new NpgsqlCommand(
+                "UPDATE outbox_messages SET next_attempt_at = now() + make_interval(secs => $2) WHERE id = ANY($1)",
+                conn, tx);
+            leaseCmd.Parameters.AddWithValue(rows.Select(m => m.Id).ToArray());
+            leaseCmd.Parameters.AddWithValue(lease.TotalSeconds);
+            await leaseCmd.ExecuteNonQueryAsync(ct);
+        }
         await tx.CommitAsync(ct);
         return rows;
     }
@@ -88,7 +99,7 @@ public sealed class InboxDedupe(NpgsqlConnection connection, NpgsqlTransaction? 
     public async Task<bool> CheckAndMarkAsync(string messageId, CancellationToken ct = default)
     {
         await using var cmd = new NpgsqlCommand(
-            "INSERT INTO inbox_consumed (message_id) VALUES ($1) ON CONFLICT DO NOTHING", connection, transaction);
+            "INSERT INTO inbox_consumed (message_id) VALUES ($1) ON CONFLICT (message_id) DO NOTHING", connection, transaction);
         cmd.Parameters.AddWithValue(messageId);
         return await cmd.ExecuteNonQueryAsync(ct) == 1;
     }

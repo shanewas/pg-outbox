@@ -20,7 +20,7 @@ public sealed class RedeliveryTests
 
         store.FailClaimOnce = true;
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => store.ClaimAsync(10, CancellationToken.None));
+            () => store.ClaimAsync(10, TimeSpan.FromSeconds(30), CancellationToken.None));
 
         await worker.RelayOnceAsync(CancellationToken.None);
         Assert.Empty(dispatched);
