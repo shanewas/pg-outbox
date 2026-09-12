@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.1.2 — 2026-09-12
+- LICENSE + README embedded in the package. No code changes.
+
 ## v0.1.1 — 2026-09-12
 - Claims carry a 30s lease (`ClaimLease` option): claimed rows hide from other
   relays until the lease lapses, so scale-out and restarts stop double-claiming.
